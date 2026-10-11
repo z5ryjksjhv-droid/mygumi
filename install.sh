@@ -362,14 +362,31 @@ def list_torrents():
                    settings=settings)
 
 
+def fetch_torrent(url):
+    """.torrent 파일 주소(https://…)를 서버가 대신 내려받는다 (최대 10MB)."""
+    import urllib.request
+    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 MyTorrent"})
+    with urllib.request.urlopen(req, timeout=20) as r:
+        data = r.read(10 * 1024 * 1024 + 1)
+    if len(data) > 10 * 1024 * 1024:
+        raise ValueError("파일이 너무 커요")
+    if not data.startswith(b"d"):
+        raise ValueError("이 주소는 .torrent 파일이 아니에요")
+    return data
+
+
 @app.post("/api/add")
 @login_required
 def add():
     magnet = (request.form.get("magnet") or "").strip()
     upload = request.files.get("torrent")
     try:
+        data = None
         if upload:
             data = upload.read()
+        elif magnet.lower().startswith(("http://", "https://")):
+            data = fetch_torrent(magnet)
+        if data is not None:
             ti = lt.torrent_info(lt.bdecode(data))  # 형식 검사
             tmp_key = secrets.token_hex(8)
             path = os.path.join(STATE_DIR, "torrents", tmp_key + ".torrent")
@@ -384,7 +401,7 @@ def add():
             key, h = add_to_session(magnet=magnet)
             entry = {"magnet": magnet}
         else:
-            return jsonify(error="마그넷 링크나 .torrent 파일을 넣어 주세요"), 400
+            return jsonify(error="마그넷 링크, .torrent 주소, 또는 파일을 넣어 주세요"), 400
     except Exception as e:
         return jsonify(error=f"추가하지 못했어요: {e}"), 400
     with _lock:
@@ -637,9 +654,9 @@ textarea{height:96px;resize:none}
 <section class="sheet" id="addSheet" aria-label="토렌트 추가">
   <div class="grab"></div>
   <h2>토렌트 추가</h2>
-  <textarea id="magnet" placeholder="magnet:?xt=urn:btih:… 링크를 붙여 넣으세요" autocapitalize="off" autocorrect="off" spellcheck="false"></textarea>
+  <textarea id="magnet" placeholder="마그넷 링크나 .torrent 파일 주소(https://…)를 붙여 넣으세요" autocapitalize="off" autocorrect="off" spellcheck="false"></textarea>
   <div class="or">또는</div>
-  <label class="filepick" id="pickLabel">.torrent 파일 선택<input type="file" id="tfile" accept=".torrent,application/x-bittorrent"></label>
+  <label class="filepick" id="pickLabel">.torrent 파일 선택<input type="file" id="tfile"></label>
   <div class="actions">
     <button class="btn" data-close>취소</button>
     <button class="btn primary" id="addBtn">받기 시작</button>
