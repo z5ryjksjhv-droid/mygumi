@@ -26,15 +26,15 @@ fi
 
 say "1/6 필요한 프로그램 설치 (1~3분)"
 export DEBIAN_FRONTEND=noninteractive
-apt-get update -y -qq
-apt-get install -y -qq python3 python3-libtorrent python3-flask python3-waitress curl ca-certificates >/dev/null
-if ! apt-get install -y -qq caddy >/dev/null 2>&1; then
+apt-get -o DPkg::Lock::Timeout=600 update -y -qq
+apt-get -o DPkg::Lock::Timeout=600 install -y -qq python3 python3-libtorrent python3-flask python3-waitress curl ca-certificates >/dev/null
+if ! apt-get -o DPkg::Lock::Timeout=600 install -y -qq caddy >/dev/null 2>&1; then
   # 22.04 처럼 기본 저장소에 caddy 가 없는 경우 공식 저장소 추가
-  apt-get install -y -qq debian-keyring debian-archive-keyring apt-transport-https gnupg >/dev/null
+  apt-get -o DPkg::Lock::Timeout=600 install -y -qq debian-keyring debian-archive-keyring apt-transport-https gnupg >/dev/null
   curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --dearmor --yes -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
   curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' > /etc/apt/sources.list.d/caddy-stable.list
-  apt-get update -y -qq
-  apt-get install -y -qq caddy >/dev/null
+  apt-get -o DPkg::Lock::Timeout=600 update -y -qq
+  apt-get -o DPkg::Lock::Timeout=600 install -y -qq caddy >/dev/null
 fi
 python3 -c "import libtorrent, flask, waitress" || { echo "파이썬 패키지 설치 실패"; exit 1; }
 
