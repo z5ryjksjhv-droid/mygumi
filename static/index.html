@@ -1,0 +1,293 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="내 토렌트">
+<meta name="theme-color" content="#f4f4f1" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#121312" media="(prefers-color-scheme: dark)">
+<link rel="apple-touch-icon" href="/icon-180.png">
+<link rel="manifest" href="/manifest.webmanifest">
+<title>내 토렌트</title>
+<style>
+:root{
+  --bg:#f4f4f1; --card:#ffffff; --ink:#191a18; --sub:#6b6d68; --line:#e4e4df;
+  --accent:#1f7a5c; --accent-ink:#ffffff; --track:#e9e9e4; --warn:#b4471f;
+  --sheet:#ffffff; --shade:rgba(0,0,0,.35);
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --bg:#121312; --card:#1c1d1b; --ink:#eeeee9; --sub:#9a9c96; --line:#2a2b29;
+    --accent:#4cc196; --accent-ink:#0d1a14; --track:#2b2d2a; --warn:#f08a62;
+    --sheet:#1f201e; --shade:rgba(0,0,0,.6);
+  }
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;background:var(--bg);color:var(--ink);
+  font:16px/1.45 -apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Pretendard",system-ui,sans-serif}
+body{padding:env(safe-area-inset-top) 0 calc(96px + env(safe-area-inset-bottom))}
+header{display:flex;align-items:flex-end;justify-content:space-between;padding:20px 16px 8px}
+h1{font-size:30px;line-height:1.1;margin:0;letter-spacing:-.02em}
+.disk{font-size:13px;color:var(--sub);margin:2px 0 0}
+.icon-btn{border:0;background:var(--card);color:var(--ink);width:40px;height:40px;border-radius:12px;
+  display:grid;place-items:center;border:1px solid var(--line)}
+.icon-btn svg{width:20px;height:20px}
+main{padding:8px 16px;display:flex;flex-direction:column;gap:10px}
+.empty{color:var(--sub);text-align:center;padding:64px 16px;font-size:15px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:14px 14px 12px}
+.row{display:flex;align-items:center;gap:10px}
+.name{font-weight:600;font-size:15px;word-break:break-all;flex:1;
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.badge{font-size:12px;padding:3px 8px;border-radius:999px;background:var(--track);color:var(--sub);white-space:nowrap}
+.badge.on{background:var(--accent);color:var(--accent-ink)}
+.badge.err{background:var(--warn);color:#fff}
+.bar{height:6px;background:var(--track);border-radius:3px;margin:10px 0 8px;overflow:hidden}
+.bar>i{display:block;height:100%;background:var(--accent);border-radius:3px;transition:width .4s}
+.meta{font-size:13px;color:var(--sub);display:flex;flex-wrap:wrap;gap:4px 12px;font-variant-numeric:tabular-nums}
+.actions{display:flex;gap:8px;margin-top:10px}
+.btn{flex:1;border:1px solid var(--line);background:transparent;color:var(--ink);border-radius:10px;
+  padding:9px 10px;font:inherit;font-size:14px}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink);font-weight:600}
+.btn.danger{color:var(--warn)}
+.files{margin-top:10px;border-top:1px solid var(--line);padding-top:6px}
+.file{padding:9px 0;border-bottom:1px solid var(--line)}
+.file:last-child{border-bottom:0}
+.fname{font-size:14px;word-break:break-all}
+.fmeta{font-size:12px;color:var(--sub);margin-top:2px}
+.flinks{display:flex;gap:6px;margin-top:6px;flex-wrap:wrap}
+.flinks a{font-size:13px;text-decoration:none;color:var(--accent);border:1px solid var(--line);
+  border-radius:8px;padding:5px 10px}
+.fab{position:fixed;right:16px;bottom:calc(20px + env(safe-area-inset-bottom));height:56px;padding:0 22px;
+  border:0;border-radius:28px;background:var(--accent);color:var(--accent-ink);font:600 16px/1 inherit;
+  display:flex;align-items:center;gap:8px;box-shadow:0 6px 20px rgba(0,0,0,.18)}
+.fab svg{width:20px;height:20px}
+.shade{position:fixed;inset:0;background:var(--shade);opacity:0;pointer-events:none;transition:opacity .2s}
+.shade.open{opacity:1;pointer-events:auto}
+.sheet{position:fixed;left:0;right:0;bottom:0;background:var(--sheet);border-radius:20px 20px 0 0;
+  padding:10px 16px calc(20px + env(safe-area-inset-bottom));transform:translateY(105%);transition:transform .25s ease}
+.sheet.open{transform:none}
+.grab{width:36px;height:5px;border-radius:3px;background:var(--line);margin:0 auto 12px}
+.sheet h2{font-size:18px;margin:0 0 12px}
+textarea,input[type=number]{width:100%;border:1px solid var(--line);background:var(--bg);color:var(--ink);
+  border-radius:12px;padding:12px;font:inherit;font-size:16px}
+textarea{height:96px;resize:none}
+.or{text-align:center;color:var(--sub);font-size:13px;margin:12px 0}
+.filepick{display:block;text-align:center;border:1.5px dashed var(--line);border-radius:12px;padding:14px;color:var(--sub);font-size:15px}
+.filepick input{display:none}
+.sheet .actions{margin-top:14px}
+.setting{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid var(--line)}
+.setting small{display:block;color:var(--sub);font-size:12px}
+.setting input[type=number]{width:110px;text-align:right}
+.switch{position:relative;width:51px;height:31px;flex:none}
+.switch input{opacity:0;width:0;height:0}
+.switch span{position:absolute;inset:0;background:var(--track);border-radius:16px;transition:.2s}
+.switch span:before{content:"";position:absolute;width:27px;height:27px;left:2px;top:2px;background:#fff;border-radius:50%;transition:.2s;box-shadow:0 1px 3px rgba(0,0,0,.25)}
+.switch input:checked+span{background:var(--accent)}
+.switch input:checked+span:before{transform:translateX(20px)}
+.toast{position:fixed;left:50%;top:calc(12px + env(safe-area-inset-top));transform:translate(-50%,-150%);
+  background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:12px;font-size:14px;transition:transform .25s;max-width:90vw}
+.toast.show{transform:translate(-50%,0)}
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>내 토렌트</h1>
+    <p class="disk" id="disk">&nbsp;</p>
+  </div>
+  <button class="icon-btn" id="openSettings" aria-label="설정">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
+  </button>
+</header>
+
+<main id="list"><div class="empty">불러오는 중…</div></main>
+
+<button class="fab" id="openAdd"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>추가</button>
+
+<div class="shade" id="shade"></div>
+
+<section class="sheet" id="addSheet" aria-label="토렌트 추가">
+  <div class="grab"></div>
+  <h2>토렌트 추가</h2>
+  <textarea id="magnet" placeholder="magnet:?xt=urn:btih:… 링크를 붙여 넣으세요" autocapitalize="off" autocorrect="off" spellcheck="false"></textarea>
+  <div class="or">또는</div>
+  <label class="filepick" id="pickLabel">.torrent 파일 선택<input type="file" id="tfile" accept=".torrent,application/x-bittorrent"></label>
+  <div class="actions">
+    <button class="btn" data-close>취소</button>
+    <button class="btn primary" id="addBtn">받기 시작</button>
+  </div>
+</section>
+
+<section class="sheet" id="setSheet" aria-label="설정">
+  <div class="grab"></div>
+  <h2>설정</h2>
+  <div class="setting">
+    <div>다 받으면 공유 멈추기<small>완료 후 업로드를 자동으로 멈춰요</small></div>
+    <label class="switch"><input type="checkbox" id="sStop"><span></span></label>
+  </div>
+  <div class="setting">
+    <div>다운로드 속도 제한<small>KB/s · 0이면 무제한</small></div>
+    <input type="number" id="sDown" inputmode="numeric" min="0">
+  </div>
+  <div class="setting">
+    <div>업로드 속도 제한<small>KB/s · 0이면 무제한</small></div>
+    <input type="number" id="sUp" inputmode="numeric" min="0">
+  </div>
+  <div class="actions">
+    <button class="btn danger" id="logout">로그아웃</button>
+    <button class="btn primary" id="saveSet">저장</button>
+  </div>
+</section>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const $ = s => document.querySelector(s);
+const list = $('#list');
+const openFiles = new Set();
+let lastSettings = null;
+
+function fmtBytes(n){
+  if(!n) return '0 B';
+  const u=['B','KB','MB','GB','TB']; let i=0;
+  while(n>=1024 && i<u.length-1){n/=1024;i++}
+  return (n>=100||i===0?n.toFixed(0):n.toFixed(1))+' '+u[i];
+}
+function fmtEta(s){
+  if(s==null) return '';
+  if(s<60) return s+'초';
+  if(s<3600) return Math.round(s/60)+'분';
+  const h=Math.floor(s/3600), m=Math.round((s%3600)/60);
+  return h+'시간'+(m?' '+m+'분':'');
+}
+function esc(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+function toast(msg){const t=$('#toast');t.textContent=msg;t.classList.add('show');clearTimeout(t._h);t._h=setTimeout(()=>t.classList.remove('show'),2400)}
+
+async function api(path, opts={}){
+  const r = await fetch(path, {credentials:'same-origin', ...opts});
+  if(r.status===401){location.href='/login';throw new Error('login')}
+  const j = await r.json().catch(()=>({}));
+  if(!r.ok) throw new Error(j.error||('오류 '+r.status));
+  return j;
+}
+
+const PLAYABLE = /\.(mp4|m4v|mov|mp3|m4a|aac|wav|jpg|jpeg|png|gif|pdf|txt)$/i;
+
+function renderCard(t){
+  const pct = Math.floor(t.progress*1000)/10;
+  const cls = t.error?'err':(!t.paused && !t.finished?'on':'');
+  const speed = !t.paused && !t.finished ? `<span>↓ ${fmtBytes(t.down)}/s</span>` : '';
+  const up = t.up>0 ? `<span>↑ ${fmtBytes(t.up)}/s</span>` : '';
+  const eta = t.eta!=null && !t.finished ? `<span>${fmtEta(t.eta)} 남음</span>` : '';
+  const peers = !t.paused ? `<span>연결 ${t.peers} · 시드 ${t.seeds}</span>` : '';
+  return `<article class="card" data-hash="${t.hash}">
+    <div class="row"><div class="name">${esc(t.name)}</div><span class="badge ${cls}">${esc(t.state)}</span></div>
+    <div class="bar"><i style="width:${pct}%"></i></div>
+    <div class="meta"><span>${pct}%</span><span>${fmtBytes(t.done)} / ${fmtBytes(t.size)}</span>${speed}${up}${eta}${peers}</div>
+    ${t.error?`<div class="meta" style="color:var(--warn)">${esc(t.error)}</div>`:''}
+    <div class="actions">
+      <button class="btn" data-act="files">${openFiles.has(t.hash)?'파일 닫기':'파일 보기'}</button>
+      <button class="btn" data-act="${t.paused?'resume':'pause'}">${t.paused?(t.finished?'다시 공유':'계속'):'일시정지'}</button>
+      <button class="btn danger" data-act="delete">삭제</button>
+    </div>
+    <div class="files" data-files ${openFiles.has(t.hash)?'':'hidden'}></div>
+  </article>`;
+}
+
+async function loadFiles(card){
+  const hash = card.dataset.hash;
+  const box = card.querySelector('[data-files]');
+  try{
+    const {files} = await api(`/api/torrents/${hash}/files`);
+    if(!files.length){box.innerHTML='<div class="fmeta">파일 정보를 받는 중이에요…</div>';return}
+    box.innerHTML = files.map(f=>{
+      const full = location.origin + f.url;
+      const links = f.complete ? `
+        ${PLAYABLE.test(f.path)?`<a href="${f.url}" target="_blank">▶︎ 열기</a>`:''}
+        <a href="vlc-x-callback://x-callback-url/stream?url=${encodeURIComponent(full)}">VLC로 재생</a>
+        <a href="${f.url}&dl=1">저장</a>
+        <a href="#" data-copy="${esc(full)}">주소 복사</a>` : '';
+      return `<div class="file"><div class="fname">${esc(f.path.split('/').pop())}</div>
+        <div class="fmeta">${fmtBytes(f.size)} · ${f.complete?'완료':Math.floor(f.done/Math.max(f.size,1)*100)+'%'}</div>
+        ${links?`<div class="flinks">${links}</div>`:''}</div>`;
+    }).join('');
+  }catch(e){box.innerHTML=`<div class="fmeta">${esc(e.message)}</div>`}
+}
+
+async function refresh(){
+  try{
+    const d = await api('/api/torrents');
+    lastSettings = d.settings;
+    $('#disk').textContent = `남은 공간 ${fmtBytes(d.disk.free)} / ${fmtBytes(d.disk.total)}`;
+    if(!d.torrents.length){list.innerHTML='<div class="empty">아직 받은 게 없어요.<br>아래 <b>추가</b>를 눌러 시작하세요.</div>';return}
+    // 열려 있는 파일 목록은 유지하면서 카드만 갱신
+    const keep = {};
+    list.querySelectorAll('.card').forEach(c=>{const b=c.querySelector('[data-files]'); if(!b.hidden) keep[c.dataset.hash]=b.innerHTML});
+    list.innerHTML = d.torrents.map(renderCard).join('');
+    list.querySelectorAll('.card').forEach(c=>{
+      if(openFiles.has(c.dataset.hash)){
+        const b=c.querySelector('[data-files]');
+        if(keep[c.dataset.hash]) b.innerHTML=keep[c.dataset.hash];
+      }
+    });
+  }catch(e){ if(e.message!=='login') $('#disk').textContent='서버에 연결할 수 없어요'; }
+}
+
+list.addEventListener('click', async e=>{
+  const copy = e.target.closest('[data-copy]');
+  if(copy){e.preventDefault();try{await navigator.clipboard.writeText(copy.dataset.copy);toast('주소를 복사했어요 (12시간 유효)')}catch{toast('복사하지 못했어요')}return}
+  const btn = e.target.closest('[data-act]'); if(!btn) return;
+  const card = btn.closest('.card'); const hash = card.dataset.hash; const act = btn.dataset.act;
+  if(act==='files'){
+    const box = card.querySelector('[data-files]');
+    if(openFiles.has(hash)){openFiles.delete(hash);box.hidden=true;btn.textContent='파일 보기'}
+    else{openFiles.add(hash);box.hidden=false;btn.textContent='파일 닫기';box.innerHTML='<div class="fmeta">불러오는 중…</div>';loadFiles(card)}
+    return;
+  }
+  if(act==='delete'){
+    if(!confirm('목록에서 지울까요?')) return;
+    const withFiles = confirm('받은 파일도 서버에서 지울까요?\n(확인 = 파일까지 삭제, 취소 = 목록에서만 삭제)');
+    try{await api(`/api/torrents/${hash}/delete?files=${withFiles?1:0}`,{method:'POST'});toast(withFiles?'파일까지 지웠어요':'목록에서 지웠어요')}catch(e){toast(e.message)}
+  } else {
+    try{await api(`/api/torrents/${hash}/${act}`,{method:'POST'})}catch(e){toast(e.message)}
+  }
+  refresh();
+});
+
+// 파일 목록은 4초마다 따로 새로고침(진행률)
+setInterval(()=>{list.querySelectorAll('.card').forEach(c=>{if(openFiles.has(c.dataset.hash)) loadFiles(c)})},4000);
+
+// 시트
+function openSheet(id){$('#shade').classList.add('open');$(id).classList.add('open')}
+function closeSheets(){$('#shade').classList.remove('open');document.querySelectorAll('.sheet').forEach(s=>s.classList.remove('open'))}
+$('#shade').onclick=closeSheets;
+document.querySelectorAll('[data-close]').forEach(b=>b.onclick=closeSheets);
+$('#openAdd').onclick=()=>{openSheet('#addSheet')};
+$('#tfile').onchange=e=>{const f=e.target.files[0];$('#pickLabel').firstChild.textContent=f?f.name:'.torrent 파일 선택'};
+$('#addBtn').onclick=async()=>{
+  const fd=new FormData(); const f=$('#tfile').files[0]; const m=$('#magnet').value.trim();
+  if(f) fd.append('torrent',f); else if(m) fd.append('magnet',m); else {toast('링크나 파일을 넣어 주세요');return}
+  $('#addBtn').disabled=true;
+  try{await api('/api/add',{method:'POST',body:fd});toast('받기 시작했어요');$('#magnet').value='';$('#tfile').value='';$('#pickLabel').firstChild.textContent='.torrent 파일 선택';closeSheets();refresh()}
+  catch(e){toast(e.message)}
+  finally{$('#addBtn').disabled=false}
+};
+$('#openSettings').onclick=()=>{
+  if(lastSettings){$('#sStop').checked=lastSettings.stop_when_done;$('#sDown').value=lastSettings.max_download_kbps;$('#sUp').value=lastSettings.max_upload_kbps}
+  openSheet('#setSheet');
+};
+$('#saveSet').onclick=async()=>{
+  try{await api('/api/settings',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({stop_when_done:$('#sStop').checked,max_download_kbps:+$('#sDown').value||0,max_upload_kbps:+$('#sUp').value||0})});
+    toast('저장했어요');closeSheets();refresh()}catch(e){toast(e.message)}
+};
+$('#logout').onclick=async()=>{await fetch('/logout',{method:'POST'});location.href='/login'};
+
+refresh(); setInterval(()=>{if(!document.hidden) refresh()},2000);
+document.addEventListener('visibilitychange',()=>{if(!document.hidden) refresh()});
+</script>
+</body>
+</html>
