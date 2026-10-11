@@ -61,6 +61,8 @@ import time
 from functools import wraps
 
 import libtorrent as lt
+
+import subs as subtitles
 from flask import (Flask, abort, jsonify, redirect, request, send_file,
                    send_from_directory, session)
 from itsdangerous import BadSignature, URLSafeTimedSerializer
@@ -469,13 +471,17 @@ def files(key):
         return jsonify(files=[])
     fs = ti.files()
     prog = h.file_progress()
+    paths = [fs.file_path(i) for i in range(fs.num_files())]
     out = []
     for i in range(fs.num_files()):
         size = fs.file_size(i)
         name = os.path.basename(fs.file_path(i))
         token = signer.dumps([key, i])
+        low = name.lower()
         out.append({
             "url": f"/files/{key}/{i}/{quote(name)}?t={token}",
+            "play": f"/play/{key}/{i}?t={token}" if low.endswith(subtitles.WEB_VIDEO_EXT) else None,
+            "subs": len(subtitles.match_subs(paths, i)) if low.endswith(subtitles.WEB_VIDEO_EXT) else 0,
             "index": i,
             "path": fs.file_path(i),
             "size": size,
@@ -500,19 +506,66 @@ def resolve_file(key, idx):
     return path
 
 
+def check_access(key, idx):
+    if session.get("ok"):
+        return
+    try:
+        if signer.loads(request.args.get("t", ""), max_age=LINK_MAX_AGE) != [key, idx]:
+            abort(403)
+    except BadSignature:
+        abort(403)
+
+
 @app.get("/files/<key>/<int:idx>/<path:_name>")
 def get_file(key, idx, _name):
-    if not session.get("ok"):
-        try:
-            if signer.loads(request.args.get("t", ""), max_age=LINK_MAX_AGE) != [key, idx]:
-                abort(403)
-        except BadSignature:
-            abort(403)
+    check_access(key, idx)
     path = resolve_file(key, idx)
     # conditional=True → Range 요청 지원(사파리에서 영상 바로 재생/탐색)
     return send_file(path, conditional=True,
                      as_attachment=request.args.get("dl") == "1",
                      download_name=os.path.basename(path))
+
+
+@app.get("/subs/<key>/<int:idx>/<int:track>.vtt")
+def get_subs(key, idx, track):
+    check_access(key, idx)
+    path = resolve_file(key, idx)
+    tracks = subtitles.file_to_tracks(path)
+    if track < 0 or track >= len(tracks):
+        abort(404)
+    resp = app.response_class(tracks[track][2], mimetype="text/vtt")
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
+
+
+@app.get("/play/<key>/<int:idx>")
+def play(key, idx):
+    check_access(key, idx)
+    path = resolve_file(key, idx)
+    fs = get_handle(key).torrent_file().files()
+    paths = [fs.file_path(i) for i in range(fs.num_files())]
+    name = os.path.basename(path)
+    tracks = []
+    for si in subtitles.match_subs(paths, idx):
+        try:
+            sp = resolve_file(key, si)
+        except Exception:
+            continue  # 아직 다 안 받은 자막
+        st = signer.dumps([key, si])
+        for n, (label, lang, _vtt) in enumerate(subtitles.file_to_tracks(sp)):
+            src_name = os.path.basename(sp)
+            tracks.append({"src": f"/subs/{key}/{si}/{n}.vtt?t={st}",
+                           "label": label if label != "자막" else src_name,
+                           "lang": lang})
+    data = {"title": name,
+            "video": f"/files/{key}/{idx}/{quote(name)}?t={signer.dumps([key, idx])}",
+            "tracks": tracks}
+    with open(os.path.join(APP_DIR, "static", "player.html"), encoding="utf-8") as f:
+        page = f.read()
+    blob = json.dumps(data, ensure_ascii=False).replace("</", "<\\/")
+    resp = app.response_class(page.replace("/*__DATA__*/null", blob), mimetype="text/html")
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
 
 
 @app.post("/api/settings")
@@ -538,6 +591,258 @@ if __name__ == "__main__":
         serve(app, host=HTTP_HOST, port=HTTP_PORT, threads=8)
     except ImportError:
         app.run(host=HTTP_HOST, port=HTTP_PORT, threaded=True)
+__MT_EOF__
+cat > "$APP/subs.py" <<'__MT_EOF__'
+"""자막(.smi / .srt / .vtt)을 사파리가 읽는 WebVTT 로 바꾼다."""
+import html
+import re
+
+SUB_EXT = (".smi", ".sami", ".srt", ".vtt")
+VIDEO_EXT = (".mp4", ".m4v", ".mov", ".webm", ".mkv", ".avi", ".wmv", ".ts")
+WEB_VIDEO_EXT = (".mp4", ".m4v", ".mov", ".webm")  # 사파리가 직접 재생 가능
+
+LANGS = {
+    "kr": ("한국어", "ko"), "ko": ("한국어", "ko"), "kor": ("한국어", "ko"),
+    "en": ("English", "en"), "eng": ("English", "en"), "us": ("English", "en"),
+    "jp": ("日本語", "ja"), "ja": ("日本語", "ja"), "jpn": ("日本語", "ja"),
+    "cn": ("中文", "zh"), "zh": ("中文", "zh"), "chi": ("中文", "zh"),
+}
+
+
+def decode_bytes(data: bytes) -> str:
+    if data.startswith(b"\xef\xbb\xbf"):
+        return data[3:].decode("utf-8", "replace")
+    if data.startswith((b"\xff\xfe", b"\xfe\xff")):
+        return data.decode("utf-16", "replace")
+    for enc in ("utf-8", "cp949"):
+        try:
+            return data.decode(enc)
+        except UnicodeDecodeError:
+            pass
+    return data.decode("cp949", "replace")
+
+
+def _ts(ms: int) -> str:
+    ms = max(0, int(ms))
+    h, ms = divmod(ms, 3600000)
+    m, ms = divmod(ms, 60000)
+    s, ms = divmod(ms, 1000)
+    return f"{h:02d}:{m:02d}:{s:02d}.{ms:03d}"
+
+
+def _vtt_text(s: str) -> str:
+    s = s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    lines = [ln.strip() for ln in s.split("\n")]
+    s = "\n".join(ln for ln in lines if ln)
+    return s.replace("-->", "->")
+
+
+def _lang_of(cls: str):
+    c = cls.lower()
+    for k in (c, c[:-2] if c.endswith("cc") else c, c[:2]):
+        if k in LANGS:
+            return LANGS[k]
+    return (cls, "und")
+
+
+_SYNC = re.compile(r"<sync\b[^>]*?start\s*=\s*[\"']?(-?\d+)[^>]*>", re.I)
+_P = re.compile(r"<p\b([^>]*)>", re.I)
+_CLASS = re.compile(r"class\s*=\s*[\"']?([\w-]+)", re.I)
+_BR = re.compile(r"<br\s*/?>", re.I)
+_TAG = re.compile(r"<[^>]+>")
+
+
+def smi_to_tracks(text: str):
+    body = re.split(r"<body\b[^>]*>", text, maxsplit=1, flags=re.I)[-1]
+    parts = _SYNC.split(body)
+    # parts = [앞부분, start1, 내용1, start2, 내용2, ...]
+    entries = {}  # class -> [(start, text)]
+    for i in range(1, len(parts) - 1, 2):
+        start = int(parts[i])
+        chunk = parts[i + 1]
+        pieces = _P.split(chunk)
+        if len(pieces) == 1:
+            blocks = [("default", pieces[0])]
+        else:
+            blocks = []
+            for j in range(1, len(pieces) - 1, 2):
+                m = _CLASS.search(pieces[j])
+                blocks.append((m.group(1) if m else "default", pieces[j + 1]))
+        for cls, raw in blocks:
+            t = _BR.sub("\n", raw)
+            t = _TAG.sub("", t)
+            t = html.unescape(t).replace("\xa0", " ")
+            t = re.sub(r"[ \t\r]+", " ", t)
+            entries.setdefault(cls, []).append((start, t.strip()))
+
+    tracks = []
+    for cls, items in entries.items():
+        items.sort(key=lambda x: x[0])
+        cues = []
+        for n, (start, t) in enumerate(items):
+            if not t:
+                continue
+            end = items[n + 1][0] if n + 1 < len(items) else start + 5000
+            if end <= start:
+                continue
+            cues.append(f"{_ts(start)} --> {_ts(end)}\n{_vtt_text(t)}")
+        if cues:
+            label, lang = _lang_of(cls) if cls != "default" else ("자막", "und")
+            tracks.append((label, lang, "WEBVTT\n\n" + "\n\n".join(cues) + "\n"))
+    # 한국어를 맨 앞으로
+    tracks.sort(key=lambda t: 0 if t[1] == "ko" else 1)
+    return tracks
+
+
+_SRT_TIME = re.compile(r"(\d{1,2}):(\d{2}):(\d{2})[,.](\d{1,3})")
+
+
+def srt_to_vtt(text: str) -> str:
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    text = re.sub(r"\{\\[^}]*\}", "", text)  # {\an8} 같은 태그 제거
+    out = []
+    for block in re.split(r"\n\s*\n", text.strip()):
+        lines = block.split("\n")
+        for k, ln in enumerate(lines):
+            if "-->" in ln:
+                a, _, b = ln.partition("-->")
+                ma, mb = _SRT_TIME.search(a), _SRT_TIME.search(b)
+                if not (ma and mb):
+                    break
+                def ms(m):
+                    return ((int(m.group(1)) * 60 + int(m.group(2))) * 60 + int(m.group(3))) * 1000 + int(m.group(4).ljust(3, "0"))
+                body = "\n".join(lines[k + 1:])
+                body = _TAG.sub(lambda t: t.group(0) if re.fullmatch(r"</?[ibu]>", t.group(0), re.I) else "", body)
+                body = body.replace("&", "&amp;").replace("-->", "->")
+                if body.strip():
+                    out.append(f"{_ts(ms(ma))} --> {_ts(ms(mb))}\n{body.strip()}")
+                break
+    return "WEBVTT\n\n" + "\n\n".join(out) + "\n"
+
+
+def file_to_tracks(path: str):
+    """자막 파일 → [(label, srclang, vtt_text), ...]"""
+    with open(path, "rb") as f:
+        data = f.read(8 * 1024 * 1024)
+    text = decode_bytes(data)
+    low = path.lower()
+    if low.endswith((".smi", ".sami")):
+        return smi_to_tracks(text)
+    if low.endswith(".srt"):
+        return [("자막", "und", srt_to_vtt(text))]
+    if low.endswith(".vtt"):
+        return [("자막", "und", text if text.lstrip().startswith("WEBVTT") else "WEBVTT\n\n" + text)]
+    return []
+
+
+def _stem(p: str) -> str:
+    name = p.replace("\\", "/").rsplit("/", 1)[-1]
+    return name.rsplit(".", 1)[0].lower() if "." in name else name.lower()
+
+
+def match_subs(paths, video_idx):
+    """토렌트 안의 파일 목록에서 해당 영상과 짝이 맞는 자막 인덱스들을 찾는다."""
+    vstem = _stem(paths[video_idx])
+    subs = [i for i, p in enumerate(paths) if p.lower().endswith(SUB_EXT)]
+    exact = [i for i in subs if _stem(paths[i]) == vstem or _stem(paths[i]).startswith(vstem + ".")]
+    if exact:
+        return exact
+    videos = [i for i, p in enumerate(paths) if p.lower().endswith(VIDEO_EXT)]
+    if len(videos) == 1:  # 영상이 하나뿐이면 들어 있는 자막을 전부 사용
+        return subs
+    return []
+__MT_EOF__
+cat > "$APP/static/player.html" <<'__MT_EOF__'
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#000000">
+<title>재생</title>
+<style>
+:root{--ink:#eeeee9;--sub:#9a9c96;--line:#2a2b29;--card:#1c1d1b;--accent:#4cc196;--accent-ink:#0d1a14}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;background:#000;color:var(--ink);
+  font:16px/1.45 -apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo",system-ui,sans-serif}
+body{padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom)}
+.top{display:flex;align-items:center;gap:10px;padding:10px 16px}
+.back{color:var(--accent);text-decoration:none;font-size:15px;white-space:nowrap}
+.title{font-size:14px;color:var(--sub);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
+video{display:block;width:100%;max-height:70vh;background:#000}
+video::cue{font-size:1.05em;line-height:1.35;background:rgba(0,0,0,.6)}
+.panel{padding:14px 16px;display:flex;flex-direction:column;gap:12px}
+.row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.label{font-size:13px;color:var(--sub);min-width:52px}
+.chip{border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:999px;padding:7px 12px;font:inherit;font-size:14px}
+.chip.on{background:var(--accent);border-color:var(--accent);color:var(--accent-ink);font-weight:600}
+.offset{font-variant-numeric:tabular-nums;font-size:13px;color:var(--sub);min-width:72px;text-align:center}
+.note{font-size:13px;color:var(--sub);margin:0}
+</style>
+</head>
+<body>
+<div class="top"><a class="back" href="/" id="back">← 목록</a><div class="title" id="title"></div></div>
+<video id="v" controls playsinline preload="metadata"></video>
+<div class="panel">
+  <div class="row" id="trackRow"><span class="label">자막</span></div>
+  <div class="row" id="syncRow" hidden>
+    <span class="label">싱크</span>
+    <button class="chip" data-shift="-0.5">−0.5초</button>
+    <span class="offset" id="offset">조절 없음</span>
+    <button class="chip" data-shift="0.5">+0.5초</button>
+  </div>
+  <p class="note" id="note"></p>
+</div>
+<script>
+const DATA = /*__DATA__*/null;
+const v = document.getElementById('v');
+document.getElementById('title').textContent = DATA.title;
+document.title = DATA.title;
+if (history.length > 1) document.getElementById('back').onclick = e => { e.preventDefault(); history.back(); };
+
+DATA.tracks.forEach((t, i) => {
+  const el = document.createElement('track');
+  el.kind = 'subtitles'; el.label = t.label; el.srclang = t.lang; el.src = t.src;
+  if (i === 0) el.default = true;
+  v.appendChild(el);
+});
+v.src = DATA.video;
+
+const row = document.getElementById('trackRow');
+let offset = 0;
+function select(i){
+  [...v.textTracks].forEach((tt, n) => tt.mode = (n === i ? 'showing' : 'disabled'));
+  row.querySelectorAll('.chip').forEach(b => b.classList.toggle('on', +b.dataset.i === i));
+  document.getElementById('syncRow').hidden = i < 0;
+}
+if (!DATA.tracks.length) {
+  row.insertAdjacentHTML('beforeend', '<span class="note">이 영상과 짝이 맞는 자막 파일이 없어요</span>');
+} else {
+  const mk = (i, label) => { const b = document.createElement('button'); b.className = 'chip'; b.dataset.i = i; b.textContent = label; b.onclick = () => select(i); row.appendChild(b); };
+  DATA.tracks.forEach((t, i) => mk(i, t.label));
+  mk(-1, '끄기');
+  // 트랙이 로드된 뒤 첫 번째 자막 켜기
+  setTimeout(() => select(0), 0);
+}
+
+// 싱크 조절: 보이는 트랙의 모든 자막 시간을 한꺼번에 이동
+document.querySelectorAll('[data-shift]').forEach(b => b.onclick = () => {
+  const d = parseFloat(b.dataset.shift);
+  [...v.textTracks].forEach(tt => {
+    const prev = tt.mode; if (prev === 'disabled') tt.mode = 'hidden';
+    if (tt.cues) [...tt.cues].forEach(c => { c.startTime = Math.max(0, c.startTime + d); c.endTime = Math.max(0, c.endTime + d); });
+    tt.mode = prev;
+  });
+  offset += d;
+  document.getElementById('offset').textContent = Math.abs(offset) < 0.01 ? '조절 없음' : (offset > 0 ? '늦게 ' : '빨리 ') + Math.abs(offset).toFixed(1) + '초';
+});
+
+v.addEventListener('error', () => {
+  document.getElementById('note').textContent = '사파리에서 재생할 수 없는 영상 형식이에요. 목록에서 "VLC로 재생"이나 "저장" 후 nPlayer를 이용하세요.';
+});
+</script>
+</body>
+</html>
 __MT_EOF__
 cat > "$APP/static/index.html" <<'__MT_EOF__'
 <!doctype html>
@@ -748,12 +1053,13 @@ async function loadFiles(card){
     box.innerHTML = files.map(f=>{
       const full = location.origin + f.url;
       const links = f.complete ? `
-        ${PLAYABLE.test(f.path)?`<a href="${f.url}" target="_blank">▶︎ 열기</a>`:''}
+        ${f.play?`<a href="${f.play}">▶︎ ${f.subs?'자막과 재생':'재생'}</a>`
+          :(PLAYABLE.test(f.path)?`<a href="${f.url}" target="_blank">▶︎ 열기</a>`:'')}
         <a href="vlc-x-callback://x-callback-url/stream?url=${encodeURIComponent(full)}">VLC로 재생</a>
         <a href="${f.url}&dl=1">저장</a>
         <a href="#" data-copy="${esc(full)}">주소 복사</a>` : '';
       return `<div class="file"><div class="fname">${esc(f.path.split('/').pop())}</div>
-        <div class="fmeta">${fmtBytes(f.size)} · ${f.complete?'완료':Math.floor(f.done/Math.max(f.size,1)*100)+'%'}</div>
+        <div class="fmeta">${fmtBytes(f.size)} · ${f.complete?'완료':Math.floor(f.done/Math.max(f.size,1)*100)+'%'}${f.subs?` · 자막 ${f.subs}개`:''}</div>
         ${links?`<div class="flinks">${links}</div>`:''}</div>`;
     }).join('');
   }catch(e){box.innerHTML=`<div class="fmeta">${esc(e.message)}</div>`}
@@ -1166,7 +1472,7 @@ EQAAEIoAAIBQBAAAhCIAACAUAQAAoQgAAAhFAABAKAIAAEIRAAAQigAAgFAEAACEIgAAIBQBAACh
 CAAACEUAAEAoAgAAQhEAABCKAACAUAQAAIQiAAAgFAEAAKEIAAAIRQAAQKj/D2R59bk7DzwMAAAA
 AElFTkSuQmCC
 __MT_EOF__
-chmod 644 "$APP"/app.py "$APP"/static/*
+chmod 644 "$APP"/*.py "$APP"/static/*
 
 say "4/6 비밀번호와 서비스 설정"
 if [ -f "$ENVF" ] && grep -q '^MT_PASSWORD=' "$ENVF"; then

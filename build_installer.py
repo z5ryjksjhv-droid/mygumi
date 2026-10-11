@@ -3,7 +3,7 @@
 import base64, os
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-TEXT = ["app.py", "static/index.html", "static/login.html", "static/manifest.webmanifest"]
+TEXT = ["app.py", "subs.py", "static/player.html", "static/index.html", "static/login.html", "static/manifest.webmanifest"]
 BIN = ["static/icon-180.png", "static/icon-192.png", "static/icon-512.png"]
 
 parts = []

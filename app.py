@@ -14,6 +14,8 @@ import time
 from functools import wraps
 
 import libtorrent as lt
+
+import subs as subtitles
 from flask import (Flask, abort, jsonify, redirect, request, send_file,
                    send_from_directory, session)
 from itsdangerous import BadSignature, URLSafeTimedSerializer
@@ -422,13 +424,17 @@ def files(key):
         return jsonify(files=[])
     fs = ti.files()
     prog = h.file_progress()
+    paths = [fs.file_path(i) for i in range(fs.num_files())]
     out = []
     for i in range(fs.num_files()):
         size = fs.file_size(i)
         name = os.path.basename(fs.file_path(i))
         token = signer.dumps([key, i])
+        low = name.lower()
         out.append({
             "url": f"/files/{key}/{i}/{quote(name)}?t={token}",
+            "play": f"/play/{key}/{i}?t={token}" if low.endswith(subtitles.WEB_VIDEO_EXT) else None,
+            "subs": len(subtitles.match_subs(paths, i)) if low.endswith(subtitles.WEB_VIDEO_EXT) else 0,
             "index": i,
             "path": fs.file_path(i),
             "size": size,
@@ -453,19 +459,66 @@ def resolve_file(key, idx):
     return path
 
 
+def check_access(key, idx):
+    if session.get("ok"):
+        return
+    try:
+        if signer.loads(request.args.get("t", ""), max_age=LINK_MAX_AGE) != [key, idx]:
+            abort(403)
+    except BadSignature:
+        abort(403)
+
+
 @app.get("/files/<key>/<int:idx>/<path:_name>")
 def get_file(key, idx, _name):
-    if not session.get("ok"):
-        try:
-            if signer.loads(request.args.get("t", ""), max_age=LINK_MAX_AGE) != [key, idx]:
-                abort(403)
-        except BadSignature:
-            abort(403)
+    check_access(key, idx)
     path = resolve_file(key, idx)
     # conditional=True → Range 요청 지원(사파리에서 영상 바로 재생/탐색)
     return send_file(path, conditional=True,
                      as_attachment=request.args.get("dl") == "1",
                      download_name=os.path.basename(path))
+
+
+@app.get("/subs/<key>/<int:idx>/<int:track>.vtt")
+def get_subs(key, idx, track):
+    check_access(key, idx)
+    path = resolve_file(key, idx)
+    tracks = subtitles.file_to_tracks(path)
+    if track < 0 or track >= len(tracks):
+        abort(404)
+    resp = app.response_class(tracks[track][2], mimetype="text/vtt")
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
+
+
+@app.get("/play/<key>/<int:idx>")
+def play(key, idx):
+    check_access(key, idx)
+    path = resolve_file(key, idx)
+    fs = get_handle(key).torrent_file().files()
+    paths = [fs.file_path(i) for i in range(fs.num_files())]
+    name = os.path.basename(path)
+    tracks = []
+    for si in subtitles.match_subs(paths, idx):
+        try:
+            sp = resolve_file(key, si)
+        except Exception:
+            continue  # 아직 다 안 받은 자막
+        st = signer.dumps([key, si])
+        for n, (label, lang, _vtt) in enumerate(subtitles.file_to_tracks(sp)):
+            src_name = os.path.basename(sp)
+            tracks.append({"src": f"/subs/{key}/{si}/{n}.vtt?t={st}",
+                           "label": label if label != "자막" else src_name,
+                           "lang": lang})
+    data = {"title": name,
+            "video": f"/files/{key}/{idx}/{quote(name)}?t={signer.dumps([key, idx])}",
+            "tracks": tracks}
+    with open(os.path.join(APP_DIR, "static", "player.html"), encoding="utf-8") as f:
+        page = f.read()
+    blob = json.dumps(data, ensure_ascii=False).replace("</", "<\\/")
+    resp = app.response_class(page.replace("/*__DATA__*/null", blob), mimetype="text/html")
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
 
 
 @app.post("/api/settings")

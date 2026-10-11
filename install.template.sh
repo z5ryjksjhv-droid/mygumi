@@ -45,7 +45,7 @@ chown -R mytorrent:mytorrent "$DATA" "$STATE"
 
 say "3/6 앱 파일 설치"
 #__FILES__
-chmod 644 "$APP"/app.py "$APP"/static/*
+chmod 644 "$APP"/*.py "$APP"/static/*
 
 say "4/6 비밀번호와 서비스 설정"
 if [ -f "$ENVF" ] && grep -q '^MT_PASSWORD=' "$ENVF"; then

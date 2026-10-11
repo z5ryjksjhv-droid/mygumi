@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#000000">
+<title>재생</title>
+<style>
+:root{--ink:#eeeee9;--sub:#9a9c96;--line:#2a2b29;--card:#1c1d1b;--accent:#4cc196;--accent-ink:#0d1a14}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;background:#000;color:var(--ink);
+  font:16px/1.45 -apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo",system-ui,sans-serif}
+body{padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom)}
+.top{display:flex;align-items:center;gap:10px;padding:10px 16px}
+.back{color:var(--accent);text-decoration:none;font-size:15px;white-space:nowrap}
+.title{font-size:14px;color:var(--sub);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
+video{display:block;width:100%;max-height:70vh;background:#000}
+video::cue{font-size:1.05em;line-height:1.35;background:rgba(0,0,0,.6)}
+.panel{padding:14px 16px;display:flex;flex-direction:column;gap:12px}
+.row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.label{font-size:13px;color:var(--sub);min-width:52px}
+.chip{border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:999px;padding:7px 12px;font:inherit;font-size:14px}
+.chip.on{background:var(--accent);border-color:var(--accent);color:var(--accent-ink);font-weight:600}
+.offset{font-variant-numeric:tabular-nums;font-size:13px;color:var(--sub);min-width:72px;text-align:center}
+.note{font-size:13px;color:var(--sub);margin:0}
+</style>
+</head>
+<body>
+<div class="top"><a class="back" href="/" id="back">← 목록</a><div class="title" id="title"></div></div>
+<video id="v" controls playsinline preload="metadata"></video>
+<div class="panel">
+  <div class="row" id="trackRow"><span class="label">자막</span></div>
+  <div class="row" id="syncRow" hidden>
+    <span class="label">싱크</span>
+    <button class="chip" data-shift="-0.5">−0.5초</button>
+    <span class="offset" id="offset">조절 없음</span>
+    <button class="chip" data-shift="0.5">+0.5초</button>
+  </div>
+  <p class="note" id="note"></p>
+</div>
+<script>
+const DATA = /*__DATA__*/null;
+const v = document.getElementById('v');
+document.getElementById('title').textContent = DATA.title;
+document.title = DATA.title;
+if (history.length > 1) document.getElementById('back').onclick = e => { e.preventDefault(); history.back(); };
+
+DATA.tracks.forEach((t, i) => {
+  const el = document.createElement('track');
+  el.kind = 'subtitles'; el.label = t.label; el.srclang = t.lang; el.src = t.src;
+  if (i === 0) el.default = true;
+  v.appendChild(el);
+});
+v.src = DATA.video;
+
+const row = document.getElementById('trackRow');
+let offset = 0;
+function select(i){
+  [...v.textTracks].forEach((tt, n) => tt.mode = (n === i ? 'showing' : 'disabled'));
+  row.querySelectorAll('.chip').forEach(b => b.classList.toggle('on', +b.dataset.i === i));
+  document.getElementById('syncRow').hidden = i < 0;
+}
+if (!DATA.tracks.length) {
+  row.insertAdjacentHTML('beforeend', '<span class="note">이 영상과 짝이 맞는 자막 파일이 없어요</span>');
+} else {
+  const mk = (i, label) => { const b = document.createElement('button'); b.className = 'chip'; b.dataset.i = i; b.textContent = label; b.onclick = () => select(i); row.appendChild(b); };
+  DATA.tracks.forEach((t, i) => mk(i, t.label));
+  mk(-1, '끄기');
+  // 트랙이 로드된 뒤 첫 번째 자막 켜기
+  setTimeout(() => select(0), 0);
+}
+
+// 싱크 조절: 보이는 트랙의 모든 자막 시간을 한꺼번에 이동
+document.querySelectorAll('[data-shift]').forEach(b => b.onclick = () => {
+  const d = parseFloat(b.dataset.shift);
+  [...v.textTracks].forEach(tt => {
+    const prev = tt.mode; if (prev === 'disabled') tt.mode = 'hidden';
+    if (tt.cues) [...tt.cues].forEach(c => { c.startTime = Math.max(0, c.startTime + d); c.endTime = Math.max(0, c.endTime + d); });
+    tt.mode = prev;
+  });
+  offset += d;
+  document.getElementById('offset').textContent = Math.abs(offset) < 0.01 ? '조절 없음' : (offset > 0 ? '늦게 ' : '빨리 ') + Math.abs(offset).toFixed(1) + '초';
+});
+
+v.addEventListener('error', () => {
+  document.getElementById('note').textContent = '사파리에서 재생할 수 없는 영상 형식이에요. 목록에서 "VLC로 재생"이나 "저장" 후 nPlayer를 이용하세요.';
+});
+</script>
+</body>
+</html>

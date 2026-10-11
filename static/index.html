@@ -206,12 +206,13 @@ async function loadFiles(card){
     box.innerHTML = files.map(f=>{
       const full = location.origin + f.url;
       const links = f.complete ? `
-        ${PLAYABLE.test(f.path)?`<a href="${f.url}" target="_blank">▶︎ 열기</a>`:''}
+        ${f.play?`<a href="${f.play}">▶︎ ${f.subs?'자막과 재생':'재생'}</a>`
+          :(PLAYABLE.test(f.path)?`<a href="${f.url}" target="_blank">▶︎ 열기</a>`:'')}
         <a href="vlc-x-callback://x-callback-url/stream?url=${encodeURIComponent(full)}">VLC로 재생</a>
         <a href="${f.url}&dl=1">저장</a>
         <a href="#" data-copy="${esc(full)}">주소 복사</a>` : '';
       return `<div class="file"><div class="fname">${esc(f.path.split('/').pop())}</div>
-        <div class="fmeta">${fmtBytes(f.size)} · ${f.complete?'완료':Math.floor(f.done/Math.max(f.size,1)*100)+'%'}</div>
+        <div class="fmeta">${fmtBytes(f.size)} · ${f.complete?'완료':Math.floor(f.done/Math.max(f.size,1)*100)+'%'}${f.subs?` · 자막 ${f.subs}개`:''}</div>
         ${links?`<div class="flinks">${links}</div>`:''}</div>`;
     }).join('');
   }catch(e){box.innerHTML=`<div class="fmeta">${esc(e.message)}</div>`}
